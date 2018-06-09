@@ -225,7 +225,7 @@ public final class MapJavaProxy extends ConcreteJavaProxy {
             Object value = map.get(convertedKey);
 
             if (value != null) {
-                return new RubyHashEntry(key.hashCode(), key, JavaUtil.convertJavaToUsableRubyObject(getRuntime(), value), null, null);
+                return new RubyHashEntry(key.hashCode(), key, JavaUtil.convertJavaToUsableRubyObject(getRuntime(), value));
             }
 
             return NO_ENTRY;
@@ -240,7 +240,7 @@ public final class MapJavaProxy extends ConcreteJavaProxy {
             if (value != null) {
                 map.remove(convertedKey);
                 setSize( map.size() );
-                return new RubyHashEntry(key.hashCode(), key, JavaUtil.convertJavaToUsableRubyObject(getRuntime(), value), null, null);
+                return new RubyHashEntry(key.hashCode(), key, JavaUtil.convertJavaToUsableRubyObject(getRuntime(), value));
             }
             return NO_ENTRY;
         }
