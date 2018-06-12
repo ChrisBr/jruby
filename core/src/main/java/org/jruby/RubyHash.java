@@ -58,6 +58,7 @@ import org.jruby.runtime.marshal.UnmarshalStream;
 import org.jruby.util.ByteList;
 import org.jruby.util.RecursiveComparator;
 import org.jruby.util.TypeConverter;
+import org.jruby.util.OpenAddressHashMap;
 
 import java.io.IOException;
 import java.util.AbstractCollection;
@@ -232,6 +233,7 @@ public class RubyHash extends RubyObject implements Map {
         return new RubyHash(runtime, valueMap, defaultValue);
     }
 
+    private Map internalMap;
     private RubyHashEntry[] entries;
     private int[] bins;
     private int start = 0;
@@ -309,12 +311,14 @@ public class RubyHash extends RubyObject implements Map {
     private final void allocFirst() {
         entries = new RubyHashEntry[MRI_INITIAL_CAPACITY];
         bins = new int[MRI_INITIAL_CAPACITY * 2];
+        internalMap = new OpenAddressHashMap();
         Arrays.fill(bins, EMPTY_BIN);
     }
 
     private final void allocFirst(int buckets) {
         entries = new RubyHashEntry[buckets];
         bins = new int[buckets * 2];
+        internalMap = new OpenAddressHashMap();
         Arrays.fill(bins, EMPTY_BIN);
     }
 
