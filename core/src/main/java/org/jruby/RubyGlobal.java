@@ -472,8 +472,8 @@ public class RubyGlobal {
         }
 
         @Override
-        protected RubyHashEntry internalGetEntry(IRubyObject key) {
-            if (size == 0) return NO_ENTRY;
+        protected IRubyObject internalGetEntry(IRubyObject key) {
+            if (size() == 0) return NO_ENTRY;
 
             if (!isCaseSensitive()) {
                 key = getCorrectKey(key.convertToString());
