@@ -20,6 +20,7 @@ public class OpenAddressHashMap {
       private final static int C = 1;
       public static final int COMPARE_BY_IDENTITY_F = ObjectFlags.COMPARE_BY_IDENTITY_F;
       private final static int ENTRIES_PER_PAIR = 2;
+      private int generation = 0; // generation count for O(1) clears
 
       public OpenAddressHashMap() {
           this(16);
@@ -33,7 +34,7 @@ public class OpenAddressHashMap {
           size = 0;
       }
       
-      private final void checkResize(int flags) {
+      public final void checkResize(int flags) {
           if (entries.length == size * ENTRIES_PER_PAIR) {
               resize(entries.length << 1, flags);
               return;
@@ -41,7 +42,7 @@ public class OpenAddressHashMap {
           return;
       }
       
-      private final synchronized void resize(int newCapacity, int flags) {
+      public final synchronized void resize(int newCapacity, int flags) {
         final IRubyObject[] oldTable = entries;
         final IRubyObject[] newTable = new IRubyObject[newCapacity];
         final int[] newBins = new int[newCapacity];
@@ -54,14 +55,14 @@ public class OpenAddressHashMap {
           value = oldTable[i + 1];
           newTable[i] = key;
           newTable[i + 1] = value;
-          
+
           if (key == null)
               break;
-          
+
           hash = hashValue(key, flags);
           bin = bucketIndex(hash, newBins.length);
           index = newBins[bin];
-          
+
           while(index != EMPTY_BIN) {
             bin = secondaryBucketIndex(bin, newBins.length);
             index = newBins[bin];
@@ -100,14 +101,12 @@ public class OpenAddressHashMap {
           return tmp;
       }
 
-      public void put(IRubyObject key, IRubyObject value, int flags) {
-          checkResize(flags);
-          
+      public void putNoResize(IRubyObject key, IRubyObject value, int flags) {
           final int hash = hashValue(key, flags);
           int bin = bucketIndex(hash, bins.length);
           int index = bins[bin];
           IRubyObject otherKey;
-          
+
           entries[size * ENTRIES_PER_PAIR] = key;
           entries[size * ENTRIES_PER_PAIR + 1] = value;
           while(index != EMPTY_BIN && index != DELETED_BIN) {
@@ -126,7 +125,7 @@ public class OpenAddressHashMap {
           int bin = bucketIndex(hash, bins.length);
           int index = bins[bin];
           IRubyObject otherKey;
-          
+
           while(index != EMPTY_BIN && index != DELETED_BIN) {
               otherKey = entries[index];
               if (internalKeyExist(key, otherKey, flags)) {
@@ -140,7 +139,7 @@ public class OpenAddressHashMap {
       }
       
       public IRubyObject deleteKey(final IRubyObject otherKey, int flags) {
-          if (size == 0) return null;
+          if (isEmpty()) return null;
 
           final int hash = hashValue(otherKey, flags);
           int bin = bucketIndex(hash, bins.length);
@@ -151,6 +150,7 @@ public class OpenAddressHashMap {
               if (index != DELETED_BIN) {
                   key = entries[index];
                   value = entries[index + 1];
+                  // TODO is this correct?
                   if (key == otherKey) {
                     bins[bin] = DELETED_BIN;
                     entries[index] = null;
@@ -168,7 +168,7 @@ public class OpenAddressHashMap {
       
       
       public IRubyObject deleteEntry(final IRubyObject otherKey, final IRubyObject otherValue, int flags) {
-          if (size == 0) return null;
+          if (isEmpty()) return null;
 
           final int hash = hashValue(otherKey, flags);
           int bin = bucketIndex(hash, bins.length);
@@ -179,6 +179,7 @@ public class OpenAddressHashMap {
               if (index != DELETED_BIN) {
                   key = entries[index];
                   value = entries[index + 1];
+                  // TODO is this correct?
                   if (key == otherKey && value == otherValue) {
                     bins[bin] = DELETED_BIN;
                     entries[index] = null;
@@ -199,7 +200,7 @@ public class OpenAddressHashMap {
             return null;
           return entries[index];
       }
-      
+
       public IRubyObject getValue(int index) {
           if (index == EMPTY_BIN)
             return null;
@@ -207,10 +208,85 @@ public class OpenAddressHashMap {
       }
       
       public int getSize() {
-        return size;
+          return size;
       }
       
       public boolean is_empty() {
           return size == 0;
+      }
+
+      public class BaseIterator implements Iterator {
+          final private EntryView view;
+          private int index;
+          private IRubyObject result;
+          private int startGeneration;
+
+          public BaseIterator(EntryView view) {
+              this.view = view;
+              this.startGeneration = generation;
+              index = 0;
+          }
+
+          @Override
+          public Object next() {
+              if (index >= size())
+                throw new NoSuchElementException();
+              key = entries[index];
+              value = entries[index + 1];
+              while (key == null && size() > index) {
+                  index++;
+                  key = entries[index];
+                  value = entries[index + 1];
+              }
+              result = view.convertEntry(key, value);
+              index++;
+              return result;
+          }
+
+          @Override
+          public boolean hasNext() {
+            if (isEmpty())
+                return false;
+            if (generation != startGeneration)
+                index = 0;
+            return size() == index; 
+          }
+
+          @Override
+          public void remove() {
+              if (index >= size())
+                throw new IllegalStateException("Iterator out of range");
+              deleteEntry(entries[index], entries[index + 1]);
+          }
+      }
+
+      public <T> void visitAll(ThreadContext context, VisitorWithState visitor, T state) {
+          // use -1 to disable concurrency checks
+          visitLimited(context, visitor, -1, state);
+      }
+
+      public <T> void visitLimited(ThreadContext context, VisitorWithState visitor, long size, T state) {
+          int startGeneration = generation;
+          long count = size;
+          int index = 0;
+          IRubyObject key, value;
+          for (int i = 0; i < internalMap.entries.length; i += 2) {
+              key = entries[i];
+              value = entries[i + 1];
+              if (key != null) {
+                  visitor.visit(context, this, key, value, index++, state);
+                  count--;
+              }
+          }
+
+          // it does not handle all concurrent modification cases,
+          // but at least provides correct marshal as we have exactly size entries visited (count == 0)
+          // or if count < 0 - skipped concurrent modification checks
+          if (count > 0) throw concurrentModification();
+      }
+
+      private final RaiseException concurrentModification() {
+          return getRuntime().newConcurrencyError(
+                  "Detected invalid hash contents due to unsynchronized modifications with concurrent users");
       }
 }
