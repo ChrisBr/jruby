@@ -4,9 +4,17 @@ import java.util.Map;
 import java.util.Set;
 import java.util.Arrays;
 import java.util.Collection;
+import java.util.Iterator;
+import java.util.NoSuchElementException;
 
 import org.jruby.ObjectFlags;
 import org.jruby.runtime.builtin.IRubyObject;
+import org.jruby.runtime.ThreadContext;
+import org.jruby.RubyHash.VisitorWithState;
+import org.jruby.RubyHash.EntryView;
+import org.jruby.RubyHash;
+import org.jruby.Ruby;
+import org.jruby.exceptions.RaiseException;
 
 public class OpenAddressHashMap {
       private static final int HASH_SIGN_BIT_MASK = ~(1 << 31);
@@ -206,39 +214,43 @@ public class OpenAddressHashMap {
             return null;
           return entries[index + 1];
       }
-      
+
       public int getSize() {
           return size;
       }
-      
-      public boolean is_empty() {
+
+      public boolean isEmpty() {
           return size == 0;
       }
 
       public class BaseIterator implements Iterator {
           final private EntryView view;
-          private int index;
-          private IRubyObject result;
+          private int index, flags;
+          private IRubyObject key, value;
+          private Object result;
           private int startGeneration;
+          private Ruby runtime;
 
-          public BaseIterator(EntryView view) {
+          public BaseIterator(Ruby runtime, EntryView view, int flags) {
               this.view = view;
               this.startGeneration = generation;
-              index = 0;
+              this.index = 0;
+              this.flags = flags;
+              this.runtime = runtime;
           }
 
           @Override
           public Object next() {
-              if (index >= size())
+              if (index >= getSize())
                 throw new NoSuchElementException();
               key = entries[index];
               value = entries[index + 1];
-              while (key == null && size() > index) {
+              while (key == null && getSize() > index) {
                   index++;
                   key = entries[index];
                   value = entries[index + 1];
               }
-              result = view.convertEntry(key, value);
+              result = view.convertEntry(runtime, key, value);
               index++;
               return result;
           }
@@ -249,32 +261,27 @@ public class OpenAddressHashMap {
                 return false;
             if (generation != startGeneration)
                 index = 0;
-            return size() == index; 
+            return getSize() == index;
           }
 
           @Override
           public void remove() {
-              if (index >= size())
+              if (index >= getSize())
                 throw new IllegalStateException("Iterator out of range");
-              deleteEntry(entries[index], entries[index + 1]);
+              deleteEntry(entries[index], entries[index + 1], flags);
           }
       }
 
-      public <T> void visitAll(ThreadContext context, VisitorWithState visitor, T state) {
-          // use -1 to disable concurrency checks
-          visitLimited(context, visitor, -1, state);
-      }
-
-      public <T> void visitLimited(ThreadContext context, VisitorWithState visitor, long size, T state) {
+      public <T> void visitLimited(ThreadContext context, VisitorWithState visitor, long size, T state, RubyHash hash) {
           int startGeneration = generation;
           long count = size;
           int index = 0;
           IRubyObject key, value;
-          for (int i = 0; i < internalMap.entries.length; i += 2) {
+          for (int i = 0; i < entries.length; i += 2) {
               key = entries[i];
               value = entries[i + 1];
               if (key != null) {
-                  visitor.visit(context, this, key, value, index++, state);
+                  visitor.visit(context, hash, key, value, index++, state);
                   count--;
               }
           }
@@ -282,11 +289,6 @@ public class OpenAddressHashMap {
           // it does not handle all concurrent modification cases,
           // but at least provides correct marshal as we have exactly size entries visited (count == 0)
           // or if count < 0 - skipped concurrent modification checks
-          if (count > 0) throw concurrentModification();
-      }
-
-      private final RaiseException concurrentModification() {
-          return getRuntime().newConcurrencyError(
-                  "Detected invalid hash contents due to unsynchronized modifications with concurrent users");
+          if (count > 0) throw hash.concurrentModification();
       }
 }

@@ -59,6 +59,7 @@ import org.jruby.util.ByteList;
 import org.jruby.util.RecursiveComparator;
 import org.jruby.util.TypeConverter;
 import org.jruby.util.OpenAddressHashMap;
+import org.jruby.util.OpenAddressHashMap.BaseIterator;
 
 import java.io.IOException;
 import java.util.AbstractCollection;
@@ -67,7 +68,6 @@ import java.util.Arrays;
 import java.util.Collection;
 import java.util.Iterator;
 import java.util.Map;
-import java.util.NoSuchElementException;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicIntegerFieldUpdater;
 
@@ -418,7 +418,7 @@ public class RubyHash extends RubyObject implements Map {
         }
 
         checkIterating();
-        internalMap.put(key, value, flags);
+        internalMap.putNoResize(key, value, flags);
 
         // no existing entry
         return null;
@@ -431,7 +431,11 @@ public class RubyHash extends RubyObject implements Map {
         return internalMap.getValue(index);
     }
 
-    final RubyHashEntry getEntry(IRubyObject key) {
+    protected RubyHashEntry getEntry(IRubyObject key) {
+        return internalGetEntry(key);
+    }
+
+    protected RubyHashEntry internalGetEntry(IRubyObject key) {
         int index = internalMap.getIndex(key, flags);
         IRubyObject value = internalMap.getValue(index);
         if (value == null) {
@@ -449,7 +453,7 @@ public class RubyHash extends RubyObject implements Map {
         return internalMap.deleteKey(key, flags);
     }
 
-    protected IRubyObject internalDeleteEntry(final IRubyObject key, final IRubyObject, value) {
+    protected IRubyObject internalDeleteEntry(final IRubyObject key, final IRubyObject value) {
         return internalMap.deleteEntry(key, value, flags);
     }
     
@@ -489,7 +493,7 @@ public class RubyHash extends RubyObject implements Map {
 
     public <T> void visitAll(ThreadContext context, VisitorWithState visitor, T state) {
         // use -1 to disable concurrency checks
-        internalMap.visitLimited(context, visitor, -1, state);
+        internalMap.visitLimited(context, visitor, -1, state, this);
     }
 
     /* ============================
@@ -816,7 +820,7 @@ public class RubyHash extends RubyObject implements Map {
         } else {
             checkIterating();
             if (!key.isFrozen()) key = (RubyString)key.dupFrozen();
-            internalMap.put((IRubyObject)key, value, flags);
+            internalPut(key, value, false);
         }
     }
 
@@ -827,7 +831,7 @@ public class RubyHash extends RubyObject implements Map {
         } else {
             checkIterating();
             if (!key.isFrozen()) key = (RubyString)key.dupFrozen();
-            internalMap.put((IRubyObject)key, value, flags);
+            internalPutNoResize(key, value, false);
         }
     }
 
@@ -1932,7 +1936,7 @@ public class RubyHash extends RubyObject implements Map {
        int hashSize = hash.size();
        output.writeInt(hashSize);
         try {
-            hash.visitLimited(hash.getRuntime().getCurrentContext(), MarshalDumpVisitor, hashSize, output);
+            hash.internalMap.visitLimited(hash.getRuntime().getCurrentContext(), MarshalDumpVisitor, hashSize, output, hash);
         } catch (VisitorIOException e) {
             throw (IOException)e.getCause();
         }
@@ -1977,7 +1981,7 @@ public class RubyHash extends RubyObject implements Map {
 
     @Override
     public boolean isEmpty() {
-        return internalMap.is_empty();
+        return internalMap.isEmpty();
     }
 
     @Override
@@ -2056,15 +2060,17 @@ public class RubyHash extends RubyObject implements Map {
     @Override
     public Set entrySet() {
         //return new BaseSet(ENTRY_VIEW);
-        return new Set()
+        // TODO
+        return new BaseSet(DIRECT_KEY_VIEW);
     }
 
     public Set directEntrySet() {
         //return new BaseSet(DIRECT_ENTRY_VIEW);
-        return new Set()
+        // TODO
+        return new BaseSet(DIRECT_KEY_VIEW);
     }
 
-    private final RaiseException concurrentModification() {
+    public final RaiseException concurrentModification() {
         return getRuntime().newConcurrencyError(
                 "Detected invalid hash contents due to unsynchronized modifications with concurrent users");
     }
@@ -2102,7 +2108,7 @@ public class RubyHash extends RubyObject implements Map {
 
         @Override
         public Iterator iterator() {
-            return new BaseIterator(view);
+            return internalMap.new BaseIterator(getRuntime(), view, RubyHash.this.flags);
         }
 
         @Override
@@ -2135,7 +2141,7 @@ public class RubyHash extends RubyObject implements Map {
 
         @Override
         public Iterator iterator() {
-            return new BaseIterator(view);
+            return internalMap.new BaseIterator(getRuntime(), view, RubyHash.this.flags);
         }
 
         @Override
@@ -2159,7 +2165,7 @@ public class RubyHash extends RubyObject implements Map {
         }
     }
 
-    private static abstract class EntryView {
+    public static abstract class EntryView {
         public abstract Object convertEntry(Ruby runtime, IRubyObject key, IRubyObject value);
         public abstract boolean contains(RubyHash hash, Object o);
         public abstract boolean remove(RubyHash hash, Object o);
@@ -2376,7 +2382,7 @@ public class RubyHash extends RubyObject implements Map {
     @Deprecated
     public final void visitAll(Visitor visitor) {
         // use -1 to disable concurrency checks
-        internalMap.visitLimited(getRuntime().getCurrentContext(), visitor, -1, null);
+        internalMap.visitLimited(getRuntime().getCurrentContext(), visitor, -1, null, this);
     }
 
     /** rb_hash_default

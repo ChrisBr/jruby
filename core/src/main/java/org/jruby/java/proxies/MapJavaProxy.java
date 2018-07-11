@@ -113,9 +113,13 @@ public final class MapJavaProxy extends ConcreteJavaProxy {
             this.receiver = receiver;
         }
 
-        private void syncSize() { this.size = mapDelegate().size(); }
+        private void syncSize() {
+          // TODO implement setter size() = mapDelegate().size();
+        }
 
-        private void setSize(int size) { this.size = size; }
+        private void setSize(int size) {
+          // TODO implement setter size() = size;
+        }
 
         // the underlying Map object operations should be delegated to
         private Map mapDelegate() { return receiver.getMapObject(); }
@@ -225,14 +229,14 @@ public final class MapJavaProxy extends ConcreteJavaProxy {
             Object value = map.get(convertedKey);
 
             if (value != null) {
-                return new RubyHashEntry(key.hashCode(), key, JavaUtil.convertJavaToUsableRubyObject(getRuntime(), value), null, null);
+                return new RubyHashEntry(key, JavaUtil.convertJavaToUsableRubyObject(getRuntime(), value));
             }
 
             return NO_ENTRY;
         }
 
         @Override
-        public RubyHashEntry internalDelete(final IRubyObject key) {
+        public IRubyObject internalDelete(final IRubyObject key) {
             final Map map = mapDelegate();
             Object convertedKey = key.toJava(Object.class);
             Object value = map.get(convertedKey);
@@ -240,23 +244,24 @@ public final class MapJavaProxy extends ConcreteJavaProxy {
             if (value != null) {
                 map.remove(convertedKey);
                 setSize( map.size() );
-                return new RubyHashEntry(key.hashCode(), key, JavaUtil.convertJavaToUsableRubyObject(getRuntime(), value), null, null);
+                //return new RubyHashEntry(key.hashCode(), key, JavaUtil.convertJavaToUsableRubyObject(getRuntime(), value), null, null);
+                return JavaUtil.convertJavaToUsableRubyObject(getRuntime(), value);
             }
-            return NO_ENTRY;
+            return null;
         }
 
         @Override // NOTE: likely won't be called
-        public RubyHashEntry internalDeleteEntry(final RubyHashEntry entry) {
+        public IRubyObject internalDeleteEntry(final IRubyObject key, final IRubyObject value) {
             final Map map = mapDelegate();
-            Object convertedKey = ((IRubyObject) entry.getKey()).toJava(Object.class);
+            Object convertedKey = ((IRubyObject) key).toJava(Object.class);
 
             if (map.containsKey(convertedKey)) {
                 map.remove(convertedKey);
                 setSize( map.size() );
-                return entry;
+                return value;
             }
 
-            return NO_ENTRY;
+            return null;
         }
 
         @Override
